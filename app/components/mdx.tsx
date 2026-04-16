@@ -1,12 +1,15 @@
 import Link from 'next/link'
 import Image from 'next/image'
-import { MDXRemote } from 'next-mdx-remote/rsc'
+import { MDXRemote, type MDXRemoteProps } from 'next-mdx-remote/rsc'
+import remarkGfm from 'remark-gfm'
 import { highlight } from 'sugar-high'
-import React from 'react'
+import React, { type ReactNode } from 'react'
 
 function Table({ data }) {
   let headers = data.headers.map((header, index) => (
-    <th key={index}>{header}</th>
+    <th key={index} scope="col">
+      {header}
+    </th>
   ))
   let rows = data.rows.map((row, index) => (
     <tr key={index}>
@@ -26,30 +29,63 @@ function Table({ data }) {
   )
 }
 
-function CustomLink(props) {
-  let href = props.href
+function CustomLink(props: React.ComponentPropsWithoutRef<'a'>) {
+  const { href = '', children, ...rest } = props
 
   if (href.startsWith('/')) {
     return (
-      <Link href={href} {...props}>
-        {props.children}
+      <Link href={href} {...rest}>
+        {children}
       </Link>
     )
   }
 
   if (href.startsWith('#')) {
-    return <a {...props} />
+    return (
+      <a href={href} {...rest}>
+        {children}
+      </a>
+    )
   }
 
-  return <a target="_blank" rel="noopener noreferrer" {...props} />
+  return (
+    <a target="_blank" rel="noopener noreferrer" href={href} {...rest}>
+      {children}
+      <span className="sr-only"> (opens in a new tab)</span>
+    </a>
+  )
 }
 
 function RoundedImage(props) {
   return <Image alt={props.alt} className="rounded-lg" {...props} />
 }
 
-function Code({ children, ...props }) {
-  let codeHTML = highlight(children)
+function codePlainText(children: ReactNode): string {
+  if (typeof children === 'string') return children
+  if (typeof children === 'number') return String(children)
+  if (Array.isArray(children)) return children.map(codePlainText).join('')
+  if (children && typeof children === 'object' && 'props' in children) {
+    const el = children as { props?: { children?: ReactNode } }
+    return codePlainText(el.props?.children)
+  }
+  return ''
+}
+
+function Code({
+  children,
+  className,
+  ...props
+}: React.ComponentPropsWithoutRef<'code'>) {
+  const isBlock =
+    typeof className === 'string' && className.startsWith('language-')
+  if (!isBlock) {
+    return <code {...props}>{children}</code>
+  }
+  const raw = codePlainText(children)
+  if (!raw) {
+    return <code {...props}>{children}</code>
+  }
+  let codeHTML = highlight(raw)
   return <code dangerouslySetInnerHTML={{ __html: codeHTML }} {...props} />
 }
 
@@ -57,11 +93,11 @@ function slugify(str) {
   return str
     .toString()
     .toLowerCase()
-    .trim() // Remove whitespace from both ends of a string
-    .replace(/\s+/g, '-') // Replace spaces with -
-    .replace(/&/g, '-and-') // Replace & with 'and'
-    .replace(/[^\w\-]+/g, '') // Remove all non-word characters except for -
-    .replace(/\-\-+/g, '-') // Replace multiple - with single -
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/&/g, '-and-')
+    .replace(/[^\w\-]+/g, '')
+    .replace(/\-\-+/g, '-')
 }
 
 function createHeading(level) {
@@ -99,11 +135,22 @@ let components = {
   Table,
 }
 
-export function CustomMDX(props) {
+export function CustomMDX(props: MDXRemoteProps) {
+  const { options: userOptions, components: userComponents, ...rest } = props
   return (
     <MDXRemote
-      {...props}
-      components={{ ...components, ...(props.components || {}) }}
+      {...rest}
+      components={{ ...components, ...(userComponents ?? {}) }}
+      options={{
+        ...userOptions,
+        mdxOptions: {
+          ...userOptions?.mdxOptions,
+          remarkPlugins: [
+            remarkGfm,
+            ...(userOptions?.mdxOptions?.remarkPlugins ?? []),
+          ],
+        },
+      }}
     />
   )
 }

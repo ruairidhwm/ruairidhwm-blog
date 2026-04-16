@@ -1,36 +1,45 @@
 import Link from 'next/link'
-import { formatDate, getBlogPosts } from 'app/blog/utils'
+import {
+  formatDate,
+  getBlogPostsSorted,
+  getReadingTimeMarkdown,
+} from 'app/blog/utils'
 
 export function BlogPosts() {
-  let allBlogs = getBlogPosts()
+  let allBlogs = getBlogPostsSorted()
 
   return (
     <div>
-      {allBlogs
-        .sort((a, b) => {
-          if (
-            new Date(a.metadata.publishedAt) > new Date(b.metadata.publishedAt)
-          ) {
-            return -1
-          }
-          return 1
-        })
-        .map((post) => (
+      {allBlogs.map((post) => {
+        const minutes = getReadingTimeMarkdown(post.content)
+        return (
           <Link
             key={post.slug}
-            className="flex flex-col space-y-1 mb-4"
+            className="group mb-7 flex max-w-full flex-col gap-1 rounded-md px-2 py-2.5 last:mb-0 motion-safe:transition-[background-color,color] motion-safe:duration-200 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-[var(--color-accent-soft)] focus-visible:bg-[var(--color-accent-soft)] min-h-12"
             href={`/blog/${post.slug}`}
           >
-            <div className="w-full flex flex-col md:flex-row space-x-0 md:space-x-2">
-              <p className="text-neutral-600 dark:text-neutral-400 w-[100px] tabular-nums">
+            <div className="flex w-full flex-col gap-1 md:flex-row md:items-baseline md:gap-x-3">
+              <time
+                className="w-[7.5rem] shrink-0 tabular-nums text-sm text-[var(--color-muted)]"
+                dateTime={post.metadata.publishedAt}
+              >
                 {formatDate(post.metadata.publishedAt, false)}
-              </p>
-              <p className="text-neutral-900 dark:text-neutral-100 tracking-tight">
-                {post.metadata.title}
-              </p>
+              </time>
+              <div className="min-w-0 flex-1">
+                <p className="font-heading text-fg text-[1.05rem] font-semibold leading-snug tracking-tight motion-safe:transition-colors group-hover:text-[var(--color-accent)] sm:text-[1.08rem]">
+                  {post.metadata.title}
+                </p>
+                <p className="mt-1.5 line-clamp-2 text-sm leading-relaxed text-[var(--color-muted)]">
+                  {post.metadata.summary}
+                </p>
+                <p className="mt-1.5 text-sm tabular-nums text-[var(--color-muted)]">
+                  {minutes} min read
+                </p>
+              </div>
             </div>
           </Link>
-        ))}
+        )
+      })}
     </div>
   )
 }

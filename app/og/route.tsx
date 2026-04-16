@@ -1,16 +1,59 @@
 import { ImageResponse } from 'next/og'
+import { siteConfig } from 'app/site'
+
+const bg = '#f5f2ed'
+const fg = '#1a1918'
+const muted = '#534e49'
+const accent = '#b94920'
 
 export function GET(request: Request) {
   let url = new URL(request.url)
-  let title = url.searchParams.get('title') || 'Next.js Portfolio Starter'
+  let title = url.searchParams.get('title') || siteConfig.name
 
   return new ImageResponse(
     (
-      <div tw="flex flex-col w-full h-full items-center justify-center bg-white">
-        <div tw="flex flex-col md:flex-row w-full py-12 px-4 md:items-center justify-between p-8">
-          <h2 tw="flex flex-col text-4xl font-bold tracking-tight text-left">
+      <div
+        style={{
+          display: 'flex',
+          width: '100%',
+          height: '100%',
+          backgroundColor: bg,
+          alignItems: 'stretch',
+        }}
+      >
+        <div style={{ width: 10, flexShrink: 0, backgroundColor: accent }} />
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            flex: 1,
+            paddingLeft: 56,
+            paddingRight: 48,
+          }}
+        >
+          <p
+            style={{
+              fontSize: 22,
+              color: muted,
+              marginBottom: 16,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+            }}
+          >
+            {siteConfig.name}
+          </p>
+          <h1
+            style={{
+              fontSize: title.length > 48 ? 48 : 56,
+              fontWeight: 600,
+              color: fg,
+              lineHeight: 1.12,
+              letterSpacing: '-0.02em',
+            }}
+          >
             {title}
-          </h2>
+          </h1>
         </div>
       </div>
     ),

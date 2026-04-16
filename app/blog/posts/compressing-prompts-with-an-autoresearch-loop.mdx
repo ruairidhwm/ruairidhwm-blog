@@ -1,0 +1,191 @@
+---
+title: Compressing Prompts with an Autoresearch Loop
+summary: I tested 5 production system prompts to find out what's safe to cut, what's load-bearing, and why the popular "compress by 75%" claims fall apart under scrutiny.
+publishedAt: 2026-04-16
+---
+
+## Which Parts of Your System Prompt Actually Matter?
+
+I tested 5 production system prompts to find out what's safe to cut, what's load-bearing, and why the popular "compress by 75%" claims fall apart under scrutiny.
+
+## The short answer
+
+My results suggest you can safely cut 10-20% of most production system prompts by removing duplicated rules, reformatting tool parameter syntax, and stripping formatting chrome. Beyond that, you're removing content that changes model behaviour in ways narrow test sets won't catch.
+
+Here's a practical taxonomy, derived from compressing leaked system prompts from Cursor, v0, Devin, Lovable, and Perplexity across 55 iterations of automated compression.
+
+**Safe to cut:**
+
+- **Redundant rules.** Lovable's design guidelines said "use semantic tokens" in three separate `CRITICAL` paragraphs. v0 had mobile-first in two sections. Production prompts accumulate cruft across versions - whoever added rule #47 didn't search for whether rules #12 and #31 already covered it. Deduplicate.
+- **Tool parameter syntax.** Models infer parameter semantics from inline syntax (`<open_file path="..." start_line="N"/>`) just as well as from spelled-out `Parameters:` blocks. You can reformat the _syntax_ safely. But don't strip the descriptions entirely - as we'll see below, the verbose documentation is doing more than describing parameters; it's conditioning the model to actually use the tools.
+- **Formatting chrome.** Horizontal rules, section headers on their own lines, extra blank lines, verbose section names (`## Locale and Time` → `Current Date: 3/8/2026`). Structural metadata, not semantic content.
+- **Redundant examples.** If five examples make the same point, three is usually enough.
+
+**Load-bearing - don't touch:**
+
+- **Output format examples.** Perplexity's citation format (`"Ice is less dense than water12."`) and v0's JSON tool-call example both failed every compression attempt. The model needs to _see_ the exact target format to reproduce it.
+- **Numbered workflow steps.** Lovable's 8-step Required Workflow and Cursor's 10-point tool_calling rules. Merging steps or converting to prose consistently failed, suggesting the numbered structure itself is load-bearing.
+- **Code style rules.** Each specific naming convention, error handling pattern, or comment style rule individually affects outputs. Remove one bullet and an input that exercises it drops 15 similarity points.
+- **Section-specific instructions** for different query types. If your prompt handles multiple task categories, each category's instructions are load-bearing for that category's inputs.
+- **Safety instructions.** Don't compress these even if compression "passes." Scoring functions can't detect "the model now completes harmful requests."
+
+**Probably load-bearing, but hard to measure with small test sets:**
+
+- Edge case handling rules
+- Multi-turn context instructions
+- Error recovery behaviour
+
+## How I tested this
+
+I obtained leaked system prompts from five real AI products. These aren't toy prompts - they range from 1,900 to 8,000 tokens and were written by serious engineering teams.
+
+| Prompt                | Tokens | Role                          |
+| --------------------- | ------ | ----------------------------- |
+| **v0** (Vercel)       | 8,015  | AI web app builder            |
+| **Devin** (Cognition) | 7,341  | Autonomous coding agent       |
+| **Lovable**           | 4,337  | AI web app builder            |
+| **Cursor**            | 3,009  | AI pair-programming assistant |
+| **Perplexity**        | 1,878  | Search assistant              |
+
+This is an [auto-research](https://x.com/kaboroevich/status/1882534418628419900) setup in the sense Karpathy has described - an LLM agent running a tight hypothesis-test loop with automated evaluation. I wrote a loop specification ([CLAUDE.md](https://github.com/ruairidhwm/prompt-compress/blob/main/CLAUDE.md)) and had Claude run the compression: the agent proposed each edit, ran the scoring script, and decided to keep or revert based on the result. My role was designing the evaluation, the constraints, and the stopping conditions. The 55 iterations across 5 prompts took a few hours of compute; hand-running the same loop would have taken days.
+
+Each iteration: one edit, score against 8 test inputs on gpt-4o-mini (temperature 0, seed 42), embed outputs with `text-embedding-3-small`, compare cosine similarity to a frozen baseline. Pass if avg ≥ 0.92 and min ≥ 0.85. Keep and commit on pass; revert on fail.
+
+## The initial compression looked great
+
+| Prompt         | Original   | Compressed | Reduction | Iterations |
+| -------------- | ---------- | ---------- | --------- | ---------- |
+| **v0**         | 8,015      | 3,059      | 61.8%     | 25         |
+| **Devin**      | 7,341      | 1,900      | 74.1%     | 7          |
+| **Lovable**    | 4,337      | 1,342      | 69.1%     | 10         |
+| **Cursor**     | 3,009      | 1,501      | 50.1%     | 5          |
+| **Perplexity** | 1,878      | 1,273      | 32.2%     | 8          |
+| **Total**      | **24,580** | **9,075**  | **63.1%** | 55         |
+
+63% average reduction. Devin went from 7,341 to 1,900 tokens(!), almost entirely by converting verbose tool documentation into single-line bullets.
+
+If we'd stopped here, this would be a "prompt compression works" post and we could call it a day. I didn't feel this was rigorous enough, however, so I added a broader test suite.
+
+## Broader testing broke every single one
+
+The 8 test inputs per prompt were all drawn from the same functional cluster. v0's inputs were all "build me a UI component." Devin's were all "do a standard coding task." I designed 8 additional adversarial inputs per prompt, targeting behaviours I knew the original set didn't cover:
+
+| Prompt     | Original 8 tested        | Adversarial 8 targeted                                                  |
+| ---------- | ------------------------ | ----------------------------------------------------------------------- |
+| v0         | UI component building    | Tool use, Next.js caching, AI SDK, Supabase auth, Python scripts, LaTeX |
+| Devin      | Standard coding tasks    | Planning mode, browser navigation, git/PRs, LSP, deployment             |
+| Lovable    | Full app building        | Debugging, design system tokens, discussion mode, SEO, Supabase         |
+| Cursor     | Code editing/explanation | Code style review, grep discovery, new project setup, summaries         |
+| Perplexity | AI research questions    | Weather, recipes, translation, creative writing, coding, URL lookup     |
+
+Every single compressed prompt failed.
+
+| Prompt     | Original 8 (avg sim) | Adversarial 8 (avg) | Adversarial 8 (min) | Worst failure         |
+| ---------- | -------------------- | ------------------- | ------------------- | --------------------- |
+| v0         | 0.931                | 0.863               | **0.538**           | Python script task    |
+| Devin      | 0.921                | 0.807               | **0.494**           | GitHub issue browsing |
+| Lovable    | 0.923                | 0.880               | 0.799               | 401 error debugging   |
+| Cursor     | N/A\*                | 0.901               | 0.790               | Refactor summary      |
+| Perplexity | 0.959                | 0.924               | **0.686**           | Weather query         |
+
+\*Cursor had no successful compressions in the second (deeper) compression run; the 50.1% figure above is from the first pass. Cursor's scoring gate was also structurally broken - its noise floor (0.843) falls below the 0.85 pass threshold, meaning the original prompt can't reliably pass its own gate. Cursor's results are not directly comparable to the other four. This is something I'd like to explore more in the future.
+
+## What the failures look like in practice
+
+The numbers tell you _that_ something broke. Side-by-side outputs tell you _what_.
+
+**Devin: "Investigate this GitHub issue"**
+
+Original output:
+
+```xml
+<navigate_browser url="https://github.com/acme/widget-api/issues/47" tab_idx="0"/>
+```
+
+Compressed output:
+
+```
+I'll start by navigating to the GitHub issue to read the details
+and the referenced code. Let's take a look. Opening the issue now.
+```
+
+The original emits the actual tool command. The compressed version _talks about_ doing it. The verbose tool documentation wasn't describing the tools, instead it was conditioning the model to _use_ them.
+
+This is the most important finding in the whole experiment in my opinion: tool documentation that looks like redundant description is actually functioning as behavioural conditioning. The implication is that a significant chunk of what looks like "documentation" in system prompts is actually serving a dual purpose, which is invisible until you remove it.
+
+When Devin's prompt has 10 lines per tool describing parameters, it's not just telling the model what the tool does, it's:
+
+1. **Priming the output mode.** The sheer volume of XML tool syntax in the prompt pushes the model's output distribution toward emitting XML tool calls rather than natural language. Remove the verbose examples, and the model defaults back to its natural tendency of describing what it would do rather than actually doing it.
+2. **Setting the action/narration ratio.** A prompt that's 60% tool documentation is implicitly saying "your job is mostly tool use." Compress that to, say, 15% and the prompt now reads like "your job is mostly reasoning and explanation, with some tools available." The model responds accordingly.
+3. **Functioning as few-shot examples without being labelled as such.** Each `<open_file path="..." start_line="N" end_line="N"/>` block in the documentation is effectively a demonstration of the output format. Remove the "redundant" parameter descriptions and you've removed the implicit few-shot examples.
+
+The takeaway for anyone building agents or tool-use systems: don't optimise your tool documentation for human readability. The verbose, repetitive format that looks like it was written by someone who has never heard of DRY is probably load-bearing. If you absolutely have to compress it, test with inputs that exercise every tool - not just the task the agent handles most often.
+
+**v0: "Copy this read-only file into my project"**
+
+Original output includes the actual `Move()` tool call with correct parameters. Compressed output says "Moving the file now" - no tool call, no parameters. Same pattern - tool narration replacing tool use.
+
+**Lovable: Design system customization**
+
+Original: terse 4-line plan, defers to tools. Compressed: inline CSS code dump with `rgba()` colors - violating the "NEVER use direct colors" rule that the compressed prompt still contains but apparently doesn't enforce as strongly at reduced token count.
+
+## Why the popular compression claims are wrong
+
+Three problems compound to make prompt compression look better than it is.
+
+**1. Narrow test sets create a false sense of security.**
+
+If all your test inputs exercise the same prompt section, you can gut every other section and the score won't flinch. The compression was free to remove tool documentation, planning-mode instructions, and deployment rules - the "build me a UI component" inputs never touched them. The moment I added inputs that exercised those sections, the compressed prompts fell apart.
+
+**2. Embedding similarity is blind to format.**
+
+Cosine similarity between embedding vectors measures "are these texts about the same thing?" It doesn't measure "did this text use the correct XML tool syntax?" or "did this text cite sources in brackets?"
+
+The Devin example is stark: `<navigate_browser url="..."/>` and "Opening the issue now" might score 0.8+ on embedding similarity - they're about the same topic - but one is a working tool call and the other is a broken narration.
+
+For prompts where the output _format_ is the product, you need format-aware evaluation.
+
+**3. Nobody measures the noise floor.**
+
+Before trusting any similarity score, you need to know how much the _scoring itself_ varies. I ran each original prompt against its own inputs twice:
+
+| Prompt     | Avg self-similarity | Min self-similarity |
+| ---------- | ------------------- | ------------------- |
+| v0         | 0.966               | 0.917               |
+| Devin      | 0.964               | 0.912               |
+| Lovable    | 0.984               | 0.951               |
+| Cursor     | 0.961               | **0.843**           |
+| Perplexity | 0.981               | 0.953               |
+
+Cursor's original prompt can't clear 0.85 against _itself_ on one input. Two of Cursor's five compression "failures" were actually noise. Without this measurement, you're interpreting noise as signal (or vice versa).
+
+## Practical recommendations
+
+If you're looking at your own system prompt and wondering what to cut:
+
+1. **Measure your noise floor first.** Before cutting anything, run your original prompt twice against the same inputs and measure similarity between the two runs. If that score is already close to your pass threshold, your test is too noisy to detect regressions and you can't trust any compression results until you fix that.
+
+2. **Start with deduplication.** Search for rules that say the same thing in different sections. This is the safest compression and often worth 5-10% by itself.
+
+3. **Reformat tool parameter syntax, but keep the descriptions.** If you have multi-line `Parameters:` blocks, convert to inline syntax. But don't strip the surrounding descriptions - they condition the model to use the tools, not just understand them. Devin's 74% compression passed on narrow tests and then scored 0.494 on an input that required actual tool use.
+
+4. **Strip formatting chrome.** Extra blank lines, horizontal rules, verbose section headers. These are for human readability; the model doesn't need them.
+
+5. **Stop there unless you have a strong test suite.** Beyond deduplication and reformatting, every edit risks removing load-bearing content. If you don't have 30+ diverse test inputs covering every behaviour your prompt is supposed to produce, you can't tell what's safe to cut.
+
+6. **Test format, not just semantics.** If your prompt produces tool calls, structured data, or formatted citations, verify those still parse correctly - don't rely on embedding similarity.
+
+7. **Don't compress safety instructions.** Scoring can't detect "the model now completes harmful requests." That requires dedicated red-teaming, not cosine similarity.
+
+## Methodology
+
+All code, data, and result logs: [github.com/ruairidhwm/prompt-compress](https://github.com/ruairidhwm/prompt-compress).
+
+- **Model**: gpt-4o-mini, temperature 0, seed 42. OpenAI does not guarantee bit-exact determinism even with seed set; the numbers in this post are from one specific run
+- **Embeddings**: text-embedding-3-small, cosine similarity. Using the same provider for generation and similarity measurement could inflate scores via shared representations
+- **Tokenizer**: tiktoken (gpt-4o-mini encoding)
+- **Compression loop**: edits proposed by Claude reading a [loop specification](https://github.com/ruairidhwm/prompt-compress/blob/main/CLAUDE.md); human-designed evaluation, constraints, and stopping conditions
+- **Adversarial corpus**: 8 inputs per prompt, designed to target behaviours the original 8 didn't cover. This establishes a lower bound on evaluation weakness, not a representative sample
+- **Noise floor**: original prompt run against itself twice; min self-similarity ranges 0.843–1.000
+- **Cross-model**: not tested. Whether compressions that pass on GPT-4o-mini transfer to Claude or Gemini is an open question
+- **Corpus**: 5 leaked production prompts sourced from [x1xhlol/system-prompts-and-models-of-ai-tools](https://github.com/x1xhlol/system-prompts-and-models-of-ai-tools), 8 original + 8 adversarial inputs each

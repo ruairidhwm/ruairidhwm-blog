@@ -1,21 +1,25 @@
-import { BlogPosts } from 'app/components/posts'
+import { BlogPosts } from "app/components/posts";
+import { writingSectionWhisper } from "app/lib/whimsy";
+import { siteConfig } from "app/site";
 
 export default function Page() {
+  const writingHint = writingSectionWhisper();
+
   return (
     <section>
-      <h1 className="mb-8 text-2xl font-semibold tracking-tighter">
-        My Portfolio
-      </h1>
-      <p className="mb-4">
-        {`I'm a Vim enthusiast and tab advocate, finding unmatched efficiency in
-        Vim's keystroke commands and tabs' flexibility for personal viewing
-        preferences. This extends to my support for static typing, where its
-        early error detection ensures cleaner code, and my preference for dark
-        mode, which eases long coding sessions by reducing eye strain.`}
+      <h1 className="page-title text-2xl mb-6">{siteConfig.name}</h1>
+      <p className="lede mb-4 max-w-prose">
+        {`I'm Ruairidh (/roo-ree/), a senior engineer who's spent the last few years building product at scale. I write about the things I'm actually working on: LLM evaluation, systems design, and whatever rabbit hole I've gone down that week. Code over commentary.`}
       </p>
-      <div className="my-8">
+      <div className="my-10">
+        <h2
+          className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-muted)] mb-5"
+          title={writingHint}
+        >
+          Writing
+        </h2>
         <BlogPosts />
       </div>
     </section>
-  )
+  );
 }

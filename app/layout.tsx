@@ -1,26 +1,26 @@
-import './global.css'
-import type { Metadata } from 'next'
-import { Libre_Bodoni } from 'next/font/google'
-import { GeistSans } from 'geist/font/sans'
-import { GeistMono } from 'geist/font/mono'
-import { Navbar } from './components/nav'
-import { Analytics } from '@vercel/analytics/react'
-import { SpeedInsights } from '@vercel/speed-insights/next'
-import Footer from './components/footer'
-import { WhimsyKonami } from './components/whimsy-konami'
-import { ThemeInitScript } from './components/theme-init-script'
-import { ThemeProvider } from './components/theme-provider'
-import { getBaseUrl, siteConfig } from './site'
+import "./global.css";
+import type { Metadata } from "next";
+import { Libre_Bodoni } from "next/font/google";
+import { GeistSans } from "geist/font/sans";
+import { GeistMono } from "geist/font/mono";
+import { Navbar } from "./components/nav";
+import { SpeedInsights } from "@vercel/speed-insights/next";
+import Footer from "./components/footer";
+import { WhimsyKonami } from "./components/whimsy-konami";
+import { ThemeInitScript } from "./components/theme-init-script";
+import { ThemeProvider } from "./components/theme-provider";
+import { getBaseUrl, siteConfig } from "./site";
+import { Analytics } from "@vercel/analytics/next";
 
 const editorialSerif = Libre_Bodoni({
-  subsets: ['latin'],
-  weight: ['400', '600', '700'],
-  variable: '--font-editorial',
-  display: 'swap',
-})
+  subsets: ["latin"],
+  weight: ["400", "600", "700"],
+  variable: "--font-editorial",
+  display: "swap",
+});
 
 export async function generateMetadata(): Promise<Metadata> {
-  const baseUrl = getBaseUrl()
+  const baseUrl = getBaseUrl();
   return {
     metadataBase: new URL(baseUrl),
     title: {
@@ -33,8 +33,8 @@ export async function generateMetadata(): Promise<Metadata> {
       description: siteConfig.description,
       url: baseUrl,
       siteName: siteConfig.name,
-      locale: 'en_US',
-      type: 'website',
+      locale: "en_US",
+      type: "website",
     },
     robots: {
       index: true,
@@ -42,26 +42,26 @@ export async function generateMetadata(): Promise<Metadata> {
       googleBot: {
         index: true,
         follow: true,
-        'max-video-preview': -1,
-        'max-image-preview': 'large',
-        'max-snippet': -1,
+        "max-video-preview": -1,
+        "max-image-preview": "large",
+        "max-snippet": -1,
       },
     },
     alternates: {
       types: {
-        'application/rss+xml': `${baseUrl}/rss`,
+        "application/rss+xml": `${baseUrl}/rss`,
       },
     },
-  }
+  };
 }
 
 const cx = (...classes: (string | false | undefined)[]) =>
-  classes.filter(Boolean).join(' ')
+  classes.filter(Boolean).join(" ");
 
 export default function RootLayout({
   children,
 }: {
-  children: React.ReactNode
+  children: React.ReactNode;
 }) {
   return (
     <html
@@ -71,7 +71,7 @@ export default function RootLayout({
         editorialSerif.variable,
         GeistSans.variable,
         GeistMono.variable,
-        GeistSans.className
+        GeistSans.className,
       )}
     >
       <head>
@@ -79,8 +79,8 @@ export default function RootLayout({
       </head>
       <body
         className={cx(
-          'relative min-h-screen antialiased max-w-xl mx-4 mt-8 lg:mx-auto',
-          'bg-[var(--color-bg)] text-[var(--color-fg)]'
+          "relative min-h-screen antialiased max-w-xl mx-4 mt-8 lg:mx-auto",
+          "bg-[var(--color-bg)] text-[var(--color-fg)]",
         )}
       >
         <ThemeProvider>
@@ -100,5 +100,5 @@ export default function RootLayout({
         </ThemeProvider>
       </body>
     </html>
-  )
+  );
 }

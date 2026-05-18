@@ -1,0 +1,259 @@
+---
+title: I tested 5 frontier LLMs on a long agent task. Only Sonnet 4.6 broke.
+summary: Sonnet 4.6 silently dropped a one-line format rule on 80% of long agent runs. The fix turned out to be one extra sentence in the initial user message. Tested across Opus 4.7, Sonnet 4.6, Haiku 4.5, GPT-4.1, and GPT-4o — 270 trajectories, ~$40 of API spend, four perfect end-to-end.
+publishedAt: 2026-05-18
+updatedAt: 2026-05-18
+tags: agents, llms, claude, prompt-engineering, halftrace
+---
+
+## Setup
+
+Four of five frontier LLMs held a one-line format rule across 200 sequential tool calls. The fifth - Sonnet 4.6 - abandoned it on turn 4 about 80% of the time. The fix turned out to be one extra sentence in the initial user message.
+
+<Pullquote>The bug isn't the model. The bug is the default prompting pattern.</Pullquote>
+
+I gave five frontier LLMs a small agent task and a very straightforward rule: **start every response with `STATUS: 1`, then `STATUS: 2`, then `STATUS: 3`, incrementing for as long as the conversation runs.** It feels like a bit of a waste of effort given the capabilities of LLMs but I wanted to see whether, after all the money and talent invested into this technology, a sole researcher like me could trip them up in a systematic way.
+
+Five models. Same task. Trajectory length varied from 5 to 200 sequential tool calls. 230 trajectories total. It was also a comparatively cheap exercise. I spent around $40 on API credits. I'm also sure that you could reduce that.
+
+## Why this matters
+
+This is the kind of failure that doesn't show up in benchmarks but does in production: any agent that has to maintain an output format across a long conversation is in scope. 
+
+- For engineers, you can see why some prompts fail in long-running trajectories and how to mitigate this easily. You also get some tooling to measure this in production with [halftrace](https://halftrace.dev).
+
+- For researchers, the mechanism is *strategy commitment by turn ~10*, not the attention fade that most "context rot" framings would predict; the data falsifies fade pretty cleanly via a step-function compliance pattern that a fade mechanism can't produce. Both findings come out of a diagnostic library I wrote (more below) and low API spend, so reproducing or extending any of this is cheap.
+
+## TL;DR
+
+- **Four of the five frontier models were perfect.** Opus 4.7, Haiku 4.5, GPT-4.1, GPT-4o each scored 1.0 on every cell (i.e. they made no mistakes) - no rule violation, in any model, at any length tested. On the task I tested with, the advertised capability ladder inverts: Sonnet's smaller sibling Haiku is *more* reliable than Sonnet.
+
+- **Sonnet 4.6 was the only one that broke.** Compliance at N=200 is 0.16: 4 in 5 runs silently drop the format rule. But not gradually - each run either follows the rule end-to-end or abandons it on turn 4 and never picks it up. Commit or abandon, stable for 199 turns.
+
+- **The mechanism is early-trajectory strategy commitment.** Sonnet picks a compliance strategy in the first ~10 turns and locks in. Mid-trajectory reminders briefly override the choice but never change it. This falsifies the "attention fade" explanation I'd most expected to be right.
+
+- **The fix is one extra sentence.** Restate the rule in the initial user message - not just the system prompt - and Sonnet's compliance jumps from baseline 0.51 / 0.16 (at N=100 / N=200 respectively) to **10/10 perfect at both depths**: 2010 consecutive assistant turns without a violation. As a caveat: this definitely works on prefix-style rules but so far I've seen it fail completely on suffix-style rules.
+
+If you're picking a model for a long-format agent, this belongs on a leaderboard in my opinion. It isn't on any I've seen.
+
+## How to read the scores
+
+A quick rubric before we look at the results. Compliance scores run 0 to 1:
+
+- **1.0** - the rule was followed on every assistant turn in that trajectory
+- **0.0** - the rule was never followed in that trajectory
+- **N** - trajectory length, i.e. the number of sequential tool calls in one run
+- **Cell** - one specific (model, N) combination, e.g. "Sonnet at N=100"
+- **Rep** - one full agent run through a cell. I did **10 reps per cell** because LLMs are stochastic - a single run can be lucky or unlucky in ways that hide the actual pattern; 10 reps lets you see the distribution, not just one result
+- **Per-cell mean** - the average score across a cell's 10 reps
+- **"10/10 perfect"** - every one of the 10 reps at that cell scored ≥ 0.95
+
+So "Sonnet at N=200 scored 0.16" reads as: across 10 separate 200-tool-call agent conversations, an average of 16% of Sonnet's assistant turns started with the right `STATUS:` prefix.
+
+But the mean hides what the individual trajectories actually did, and *what they did is the whole story*. A cell averaging 0.5 could be made of 5 perfect runs plus 5 total abandonments (bimodal); or 10 runs that each get roughly half their turns right (smooth degradation); or 10 runs that comply at the start and tail off (gradient decay). 
+
+It's the same number, but it illustrates three completely different failure modes, three completely different fixes. Most of this post is about reading the per-trajectory distribution behind each average - what I'll call the *shape* - and what it tells you that the mean by itself can't.
+
+## The cross-model result
+
+Each row is a model. Each column is one of four failure modes I tested, named after the probe that detects it. Each cell is the **compliance rate** on that probe at that model's deepest tested N - same 0-to-1 scale as the rubric above. 
+
+The `instruction_decay` column tracks the `STATUS:` rule from initial setup; the other three probes check whether the agent remembers earlier facts (`state_amnesia`), avoids re-calling tools with identical arguments (`tool_repetition`), and actually issues tool calls instead of describing them in text (`narration_substitution`).
+
+| Model              | state_amnesia | instruction_decay     | tool_repetition | narration_substitution |
+| ------------------ | ------------- | --------------------- | --------------- | ---------------------- |
+| **Opus 4.7**       | 1.00          | **1.00**              | 1.00            | 1.00                   |
+| **Sonnet 4.6**     | 1.00          | **0.16** (at N=200)   | 1.00            | 1.00                   |
+| **Haiku 4.5**      | 1.00          | **1.00**              | 1.00            | 1.00                   |
+| **GPT-4.1**        | 1.00          | **1.00** (to N=100)   | 1.00            | 1.00                   |
+| **GPT-4o**         | 1.00          | **1.00** (to N=100)   | 1.00            | 1.00                   |
+
+One cell out of twenty. Every other cell is 1.00 across every rep - including the cells I deliberately pushed to ~200 sequential tool calls looking for the gradual decay that I imagined would come with context rot. 
+
+There wasn't any. I was left with one weird model, and four boring ones.
+
+<Pullquote>Boring is what you want.</Pullquote>
+
+## How Sonnet breaks
+
+Sonnet's compliance score across N, 10 reps per cell:
+
+```
+N=5    0.93   ┃██████████████████░░  early near-perfect
+N=10   0.58   ┃███████████░░░░░░░░░  ← early uncertainty dip
+N=25   1.00   ┃████████████████████  locked in
+N=35   1.00   ┃████████████████████  locked in
+N=50   0.90   ┃██████████████████░░  decay starts
+N=70   0.81   ┃████████████████░░░░
+N=100  0.51   ┃██████████░░░░░░░░░░  half the trajectories abandon
+N=200  0.16   ┃███░░░░░░░░░░░░░░░░░  ← 80% abandon
+```
+
+Three regions in this curve: a dip at N=10, a perfect band at N=25–35, and a steady decline from N=50 onward. 
+
+The dip is the part I keep coming back to. Sonnet is *worse* on a 10-tool conversation than on a 25-tool one; the shorter trajectory is genuinely harder. The first time I plotted this I assumed that I'd got the scoring wrong given the distribution, but after checking several times, it's the same result.
+
+The shape isn't gradient decay. Per-rep scores at the deep cells for Sonnet:
+
+| N   | Per-rep `instruction_decay` scores                                | abandon rate |
+| --- | ----------------------------------------------------------------- | ------------ |
+| 50  | 1.00, 1.00, 0.04, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00        | 10%          |
+| 100 | 0.51, 0.02, 0.02, 0.02, 0.03, 0.51, 1.00, 0.99, 1.00, 0.99        | ~50%         |
+| 200 | 0.01, 0.01, 0.01, 0.01, 0.50, 0.01, 1.00, 0.05, 0.01, 0.01        | 80%          |
+
+Every score is either close to 1.0 (committed end-to-end) or close to 0.0 (abandoned from turn 4). What changes with N is the *ratio* between these two stable outcomes, not within-trajectory degradation.
+
+What committed and abandoned look like at the same turn:
+
+```
+COMMITTED (rep=6 at N=100):
+  STATUS: 2
+  Got the value for topic_1 (4582) and noted password #1: OTTER34. Now
+  looking up topic_2.
+
+ABANDONED (rep=2 at N=100):
+  Got it! The value of topic_1 is **4582**, and I'll remember the
+  password **OTTER34**. Moving on to topic_2!
+  Looking up topic_2 now.
+```
+
+Both understood the task. Both called the tool. Both recorded the value and password correctly. One starts with `STATUS: 2`. The other doesn't. The one that does will keep doing it for 99 more turns. The one that doesn't never will. It just completely abandons that as a task.
+
+<Pullquote>The one that doesn't never will, no matter how long the trajectory runs.</Pullquote>
+
+The other three failure modes I tested - `state_amnesia`, `tool_repetition`, `narration_substitution` - scored 1.000 across every Sonnet cell. The decay is specifically on format adherence; Sonnet is perfectly competent otherwise, which is the part I find most intriguing.
+
+## What's actually happening
+
+My first instinct for the cause of this was attention fade (i.e. context rot). The rule sits at the top of context; by turn 50 the model has stopped attending to it; refresh it periodically. So I appended a 30-token reminder to every K=10-th user message, evenly spacing 10 reminders through 100 turns.
+
+Mean compliance lifted from 0.51 to 0.70. I thought we had an easy fix there, just remind the agent and we're sorted. Then I looked at the per-rep maps and the actual structure wasn't smooth attention recovery. We actually see three discrete behaviours.
+
+The notation below: each character is one assistant turn. `1` means the rule was followed, `.` means it wasn't. `|` is where a reminder lands and primes the next turn.
+
+```
+5/9 reps:  1111111111|1111111111|...    (perfect)
+2/9 reps:  1.1.1.1.1.|1.1.1.1.1.|...    (stable alternation - insensitive to reminders)
+2/9 reps:  1.1.1.1.1.|1.........|...    (one-shot rescue - comply right after each
+                                          reminder, ignore for 9 turns until the next)
+```
+
+For the abandon-class reps, the reminder rescues exactly one assistant turn per delivery and accomplishes nothing in between. 
+
+For the alternation-class reps, the reminder accomplishes nothing at all - they comply on turns they'd have complied on anyway and skip turns they'd have skipped anyway. A fading agent would show graded compliance across distance-from-reminder. This is a step function. The result was clear: **Attention fade is the wrong story.**
+
+The detail that pointed at the right one: both abandon-class reps showed `1.1.1.1.1.` alternating compliance for the *first 10 turns*, before any reminder fires. The agent had already chosen its strategy by then; the mid-trajectory reminder only briefly perturbed it before it went right back to its previous strategy.
+
+<Pullquote>It's a strategy decision the agent locks in by turn ~10.</Pullquote>
+
+## The solution
+
+In an effort to work around this "lock-in strategy", I decided to try putting the reminder *before* turn 1 - appended to the initial user message - and kept the K=10 cadence for the rest:
+
+| Condition | N | Mean | Perfect |
+| --- | --- | --- | --- |
+| Baseline | 100 | 0.51 | 4/10 |
+| Baseline | 200 | 0.16 | 1/10 |
+| **Reminder from turn 1** | **100** | **1.000** | **10/10** |
+| **Reminder from turn 1** | **200** | **1.000** | **10/10** |
+
+2010 consecutive assistant turns at full compliance, against a baseline of 0.16. The solution has no depth ceiling I can find.
+
+The mechanism: Sonnet picks a compliance strategy in the opening ~10 turns and locks in. Whatever the agent reads before producing its first text turn determines what gets locked. 
+
+The cold-start dip at N=10 and the drift at N=100+ aren't different failure modes - they're the same strategy-commitment dynamic intervened on at different points. 
+
+_(A separate earlier finding, with full evidence in [RESULTS.md](https://github.com/ruairidhwm/halftrace/blob/main/RESULTS.md), is that at N=10 you can also drive compliance to 1.00 with a different intervention: prepending two trivial off-topic user/assistant exchanges before the real task. That cure dies past the lock-in zone; the initial-message reminder works at any length we tested.)_
+
+## Where the solution breaks
+
+Then I tested the solution on a structurally different rule - and watched it fail completely.
+
+Same model, same task, same intervention. Only difference: `end every response with [[END]]` instead of the `STATUS:` prefix. 10 reps at N=100.
+
+**0/10 perfect. Mean 0.19.** Every rep showed zero compliance for the first 10 turns despite the initial-message reminder being visible at turn 1. 2 then snapped to full compliance the moment the first mid-trajectory reminder landed; 1 fell into one-shot rescue; 7 never applied `[[END]]` at all.
+
+The solution works on **prefix rules** (compliance at the start of the response) and fails on **suffix rules** (compliance at the end). I haven't worked out why yet, but I have three ideas that I haven't ruled out:
+
+- **Token-position bias.** The prefix slots in at the most-attended position in the agent's reply; the suffix has to fight for attention against tool calls and other content.
+- **Stop-token confusion.** `[[END]]` looks like an end-of-conversation marker. The agent suppresses it precisely because it doesn't want to signal "I'm done" mid-trajectory. 
+- **Reminder interpretation.** The initial-message reminder is being read as a clarification of the *current request* rather than a *persistent behavioural rule*, and the difference matters more for suffix rules.
+
+Disambiguating these needs a third rule design - a really simple version might be a suffix rule that doesn't look like a stop token, to disentangle position from semantics. I strongly suspect the semantics is the issue.
+
+## If you're shipping an agent
+
+**If you have a free hand to pick the model**, prefer Opus 4.7, Haiku 4.5, GPT-4.1, or GPT-4o over Sonnet 4.6. None of the four broke in 150 combined trajectories.
+
+**If you're on Sonnet 4.6** (it's cheap and fast), apply the solution: restate your rule in the initial user message, not just the system prompt. For prefix-style rules at N up to 200, this takes compliance from coinflip-per-trajectory to 10/10 perfect. One-line prompt change.
+
+**If your rule is a suffix marker**, the known cure doesn't work. Redesign as a prefix if you can. Otherwise expect bimodal abandonment on Sonnet and design around it.
+
+Before writing this post, I wouldn't have said that Sonnet 4.6 couldn't reliably handle sustained-format agent workloads. 
+
+I'd say now that the reality is more nuanced, maybe something like: "use Sonnet, but apply the initial-message reminder." The model is good. The default prompting pattern is what's failing.
+
+
+
+## What would change my mind
+
+- **Higher rep counts collapsing the cross-model gap.** If a 20-rep rerun showed the other four models cracking at the 10–20% failure rate I can't currently rule out, the "Sonnet is the only one" framing would be wrong.
+
+- **A different task design making the other four break.** `find_and_synthesise` is one task with one tool surface. A task with open-ended completion criteria, conflicting constraints, or ambiguous tool semantics might surface failure modes none of these models showed. I'm interested to try some new task designs on this part to more closely reflect production systems (or please try some yourself!).
+
+- **The cure being narrower than "prefix rules."** I'm calling the failed-rule axis "prefix vs suffix". A third tested rule could reveal the real axis is different - stateful vs stateless, format vs content - and the production recommendation would need narrowing.
+
+## What I'd test next
+
+- **Why the cure fails on suffix rules.** My main open question. As I said before, I think a suffix that doesn't look like a stop token may tell a different story.
+
+- **Llama 4, Qwen, DeepSeek, Mistral.** The population where smooth context rot is most likely to appear, and the test of whether strategy lock-in is a Claude-family quirk or a general pattern. (gpt-3.5-turbo, as a sanity check, also doesn't show gradient decay - just bimodal abandonment, same shape as frontier Claude.)
+
+- **N=500, with and without the cure.** Does abandonment saturate at ~80% without the cure, or keep climbing? Does the cure still hold at depth, or does a separately-emerging mechanism eventually overtake strategy lock-in?
+
+## halftrace - how I found this, and how you can too
+
+The whole investigation hinged on reading per-trajectory *shape* rather than per-cell averages. Most observability stacks won't show you that - they report mean compliance, latency percentiles, error rates, none of which distinguish "5 perfect runs plus 5 abandonments" from "10 mediocre runs." 
+
+So I built [halftrace](https://halftrace.dev) to fill the gap. It's a small open-source library that ingests your existing agent trajectory logs (OpenAI, Anthropic, or LangSmith formats), runs them through configurable probes (the four used in this post ship with it; you can add your own), and classifies the *shape* of compliance per probe - perfect, abandoned, bimodal, categorical, gradient - with a one-line cause and a few concrete suggestions per shape. 
+
+The initial-message-reminder fix from this post lives in the library's `diagnose()` output on the bimodal branch, with the prefix-rule caveat documented as a known limitation. No new API calls - it operates on logs you already have.
+
+```bash
+pip install halftrace
+halftrace analyse --input my_logs.jsonl --format openai
+```
+
+If the shape it returns matches what you'd have guessed, great. If it doesn't, you've found something worth looking at.
+
+## Coda
+
+The simple counter rule was meant to be the warm-up. Something too trivial to score, before testing things that actually mattered. It ended up being the whole study, which was a fun surprise.
+
+One of the five most capable language models in the world will not, by default, hold "STATUS: 1, STATUS: 2, STATUS: 3" across a conversation it's otherwise perfectly competent in. The same model with one extra sentence in the initial user message holds the rule for 2010 consecutive turns without a single violation. The difference between "this model is broken on long-format work" and "this model is excellent on long-format work if you prompt it slightly differently" is a single user-side sentence.
+
+I don't know what's special about Sonnet 4.6 here - why this model needs an opening-turn reinforcement that none of the other four do. I don't know if the same shape will appear in the next Anthropic release. I don't know why the cure works flawlessly on prefix rules and not at all on suffix rules. I'd like to know all three.
+
+It goes to show that despite the billions of dollars invested into AI and its vast potential, there's still a lot of opportunity for solo-researchers and interested parties to do some work in the field. This may be useful, maybe it's not but it's been fun learning and trying to poke holes. I'm just a guy with a laptop; not a massive AI lab. I'd encourage others to try things out themselves (and poke holes in my work!)
+
+If you build agents and you've never looked at your trajectories for compliance *shape* - not aggregate compliance rate, but the per-trajectory pattern that gets averaged away - you're probably missing the failure mode that matters.
+
+<Details summary="Methods & reproduction details">
+
+All code, raw pilot data, and reproduction instructions: [github.com/ruairidhwm/halftrace](https://github.com/ruairidhwm/halftrace). The diagnostic tool is on PyPI: `pip install halftrace`.
+
+- **Models:** `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-5`, `gpt-4.1`, `gpt-4o`. Latest stable versions at time of testing.
+- **N values:** `{5, 10, 25, 35, 50, 70, 100, 200}`.
+- **Reps:** 10 per cell for Sonnet across the board; 10 for the other four at headline cells (N=25, N=100), 5 elsewhere. With 5 reps × 1.0 you rule out a true failure rate above ~45% at 95% confidence; with 10 reps × 1.0 you rule out above ~25%.
+- **Task:** `find_and_synthesise` - N lookups via a `lookup` tool plus one submit. Codeword planted on the first lookup, recall question on the last. `parallel_tool_calls=False` on every run; without this, the N axis collapses because Sonnet batches all N lookups into a single parallel `tool_use` response.
+- **Probes:** five total - `state_amnesia`, `instruction_decay`, `tool_repetition`, `narration_substitution`, `premature_termination`. The fifth ships with a second task (`find_max`); Sonnet 4.6 doesn't take the bait there either.
+- **Total spend:** ~$60 across atlas, mechanism investigation, and the long-N rescue experiments combined - 270 trajectories total. Per-trajectory cost at N=200 with prefix caching: ~$0.45 on Sonnet, ~$2.25 on Opus.
+- **Pre-registration:** [HYPOTHESES.md](https://github.com/ruairidhwm/halftrace/blob/main/HYPOTHESES.md), unchanged since before the pilots, so the divergence from prediction is visible.
+- **Full per-cell data, every script, complete cost ledger:** [RESULTS.md](https://github.com/ruairidhwm/halftrace/blob/main/RESULTS.md).
+
+Two methodological gotchas worth flagging for anyone running similar experiments:
+
+- Most published agent benchmarks don't force serial tool execution. Without `parallel_tool_calls=False` (or the Anthropic equivalent), trajectory length isn't being measured - the model collapses the trajectory into a single round trip.
+- At 3 reps per cell, bimodal data masquerades as smooth decay. I almost wrote up a "halftrace = 8.06" finding mid-pilot before extra reps revealed it was a lucky draw of three abandon-mode trajectories from a bimodal distribution. Five reps to spot bimodality, ten to estimate the rate stably.
+
+</Details>

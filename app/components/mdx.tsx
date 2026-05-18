@@ -60,6 +60,42 @@ function RoundedImage(props) {
   return <Image alt={props.alt} className="rounded-lg" {...props} />
 }
 
+function Pullquote({ children }: { children: ReactNode }) {
+  return (
+    <aside className="font-heading my-12 mx-auto max-w-xl border-y border-[var(--color-border)] py-6 text-center text-xl italic leading-snug text-[var(--color-accent)] sm:text-2xl">
+      {children}
+    </aside>
+  )
+}
+
+function Term({ children, hint }: { children: ReactNode; hint: string }) {
+  return (
+    <span className="term-wrapper">
+      <span tabIndex={0} title={hint} className="term-trigger">
+        {children}
+      </span>
+      <span aria-hidden="true" className="term-tooltip">
+        {hint}
+      </span>
+    </span>
+  )
+}
+
+function Details({
+  summary,
+  children,
+}: {
+  summary: string
+  children: ReactNode
+}) {
+  return (
+    <details className="details-block">
+      <summary>{summary}</summary>
+      <div className="details-content">{children}</div>
+    </details>
+  )
+}
+
 function codePlainText(children: ReactNode): string {
   if (typeof children === 'string') return children
   if (typeof children === 'number') return String(children)
@@ -133,6 +169,9 @@ let components = {
   a: CustomLink,
   code: Code,
   Table,
+  Pullquote,
+  Term,
+  Details,
 }
 
 export function CustomMDX(props: MDXRemoteProps) {

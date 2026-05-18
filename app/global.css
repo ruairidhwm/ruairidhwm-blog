@@ -79,6 +79,102 @@ html {
   border-width: 0;
 }
 
+.term-wrapper {
+  position: relative;
+  display: inline-block;
+  vertical-align: baseline;
+}
+.term-trigger {
+  cursor: help;
+  border-bottom: 1px dotted var(--color-accent);
+  border-radius: 0.125rem;
+  outline: none;
+  transition: background-color 120ms;
+}
+.term-trigger:focus-visible {
+  background-color: var(--color-accent-soft);
+}
+.term-tooltip {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  transform: translateX(-50%);
+  margin-bottom: 0.5rem;
+  width: 18rem;
+  max-width: calc(100vw - 2rem);
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  background-color: var(--color-bg);
+  color: var(--color-fg);
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-style: normal;
+  font-weight: 400;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 10px 25px -10px var(--color-glow), 0 4px 10px -6px rgba(0, 0, 0, 0.18);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 150ms ease, visibility 150ms ease;
+  z-index: 50;
+}
+.term-wrapper:hover .term-tooltip,
+.term-wrapper:focus-within .term-tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
+.details-block {
+  margin: 2.5rem 0;
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  overflow: hidden;
+  background-color: color-mix(in srgb, var(--color-bg) 96%, var(--color-fg) 4%);
+}
+.details-block > summary {
+  cursor: pointer;
+  padding: 0.85rem 1.1rem;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--color-fg);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  user-select: none;
+  transition: background-color 120ms;
+}
+.details-block > summary::-webkit-details-marker {
+  display: none;
+}
+.details-block > summary::after {
+  content: '+';
+  font-size: 1.4rem;
+  line-height: 1;
+  color: var(--color-accent);
+  transition: transform 200ms ease;
+  flex-shrink: 0;
+}
+.details-block[open] > summary::after {
+  content: '−';
+}
+.details-block > summary:hover {
+  background-color: var(--color-accent-soft);
+}
+.details-content {
+  padding: 0.25rem 1.1rem 1rem;
+  border-top: 1px solid var(--color-border);
+  font-size: 0.95rem;
+}
+.details-content > :first-child {
+  margin-top: 0.75rem;
+}
+
 .ambient-wrap {
   position: fixed;
   inset: 0;

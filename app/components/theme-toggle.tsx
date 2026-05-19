@@ -3,6 +3,7 @@
 import { themeToggleWhisper } from 'app/lib/whimsy'
 import { useEffect, useRef } from 'react'
 import { useTheme } from './theme-provider'
+import posthog from 'posthog-js'
 
 function IconSun() {
   return (
@@ -55,10 +56,16 @@ export function ThemeToggle() {
     skipIconEnter.current = false
   }, [])
 
+  function handleClick() {
+    const next = isDark ? 'light' : 'dark'
+    setPreference(next)
+    posthog.capture('theme_toggled', { theme: next })
+  }
+
   return (
     <button
       type="button"
-      onClick={() => setPreference(isDark ? 'light' : 'dark')}
+      onClick={handleClick}
       title={themeToggleWhisper(isDark)}
       className="flex h-10 w-10 shrink-0 items-center justify-center rounded-sm text-[var(--color-muted)] motion-safe:transition-colors hover:text-[var(--color-accent)] focus-visible:text-[var(--color-accent)] focus-visible:outline-none"
       aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}

@@ -1,3 +1,7 @@
+'use client'
+
+import posthog from 'posthog-js'
+
 function buildEmbedAction(username: string): string {
   const trimmed = username.trim().replace(/^\/+/, "").replace(/\/+$/, "");
   const segment = trimmed.split("/")[0] ?? "";
@@ -9,6 +13,10 @@ export function NewsletterSubscribe() {
   if (!username) return null;
 
   const tag = process.env.NEXT_PUBLIC_BUTTONDOWN_TAG?.trim();
+
+  function handleSubmit() {
+    posthog.capture('newsletter_subscribed')
+  }
 
   return (
     <section
@@ -31,6 +39,7 @@ export function NewsletterSubscribe() {
         rel="noopener noreferrer"
         className="mt-4 w-full"
         aria-describedby="newsletter-submit-hint"
+        onSubmit={handleSubmit}
       >
         <div className="flex flex-col gap-2">
           <label

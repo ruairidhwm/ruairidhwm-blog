@@ -5,6 +5,7 @@
  * Sequence: ↑ ↑ ↓ ↓ ← → ← → B A (outside inputs).
  */
 import { useEffect, useRef, useState } from 'react'
+import posthog from 'posthog-js'
 
 const SEQUENCE = [
   'ArrowUp',
@@ -80,6 +81,7 @@ export function WhimsyKonami() {
         if (index === SEQUENCE.length) {
           root.classList.add('whimsy-unlocked')
           sessionStorage.setItem(STORAGE_KEY, '1')
+          posthog.capture('konami_code_unlocked')
           playUnlockFeedback()
           index = 0
         }

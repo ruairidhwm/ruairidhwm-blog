@@ -18,11 +18,11 @@ Five models. Same task. Trajectory length varied from 5 to 200 sequential tool c
 
 ## Why this matters
 
-This is the kind of failure that doesn't show up in benchmarks but does in production: any agent that has to maintain an output format across a long conversation is in scope. 
+This is the kind of failure that can disappear inside aggregate benchmark scores but shows up immediately in production agents.
 
 - For engineers, you can see why some prompts fail in long-running trajectories and how to mitigate this easily. You also get some tooling to measure this in production with [halftrace](https://halftrace.dev).
 
-- For researchers, the mechanism is *strategy commitment by turn ~10*, not the attention fade that most "context rot" framings would predict; the data falsifies fade pretty cleanly via a step-function compliance pattern that a fade mechanism can't produce. Both findings come out of a diagnostic library I wrote (more below) and low API spend, so reproducing or extending any of this is cheap.
+- For researchers, the mechanism is *strategy commitment by turn ~10*, not the attention fade that most "context rot" framings would predict; the data falsifies fade pretty cleanly via a step-function compliance pattern that a fade mechanism can't produce.
 
 ## TL;DR
 
@@ -44,15 +44,20 @@ A quick rubric before we look at the results. Compliance scores run 0 to 1:
 - **0.0** - the rule was never followed in that trajectory
 - **N** - trajectory length, i.e. the number of sequential tool calls in one run
 - **Cell** - one specific (model, N) combination, e.g. "Sonnet at N=100"
-- **Rep** - one full agent run through a cell. I did **10 reps per cell** because LLMs are stochastic - a single run can be lucky or unlucky in ways that hide the actual pattern; 10 reps lets you see the distribution, not just one result
+- **Rep** - one full agent run through a cell. I did **10 reps per cell** because LLMs are stochastic - a single run can be lucky or unlucky in ways that hide the actual pattern.
 - **Per-cell mean** - the average score across a cell's 10 reps
 - **"10/10 perfect"** - every one of the 10 reps at that cell scored ≥ 0.95
 
 So "Sonnet at N=200 scored 0.16" reads as: across 10 separate 200-tool-call agent conversations, an average of 16% of Sonnet's assistant turns started with the right `STATUS:` prefix.
 
-But the mean hides what the individual trajectories actually did, and *what they did is the whole story*. A cell averaging 0.5 could be made of 5 perfect runs plus 5 total abandonments (bimodal); or 10 runs that each get roughly half their turns right (smooth degradation); or 10 runs that comply at the start and tail off (gradient decay). 
+The important thing is that identical averages can hide completely different trajectory behaviour.
 
-It's the same number, but it illustrates three completely different failure modes, three completely different fixes. Most of this post is about reading the per-trajectory distribution behind each average - what I'll call the *shape* - and what it tells you that the mean by itself can't.
+A score of 0.5 could mean:
+- 5 perfect runs and 5 abandonments
+- 10 partially compliant runs
+- gradual degradation over time
+
+Those are different mechanisms with different fixes. The trajectory shape matters more than the average.
 
 ## The cross-model result
 
@@ -93,7 +98,7 @@ Three regions in this curve: a dip at N=10, a perfect band at N=25–35, and a s
 
 The dip is the part I keep coming back to. Sonnet is *worse* on a 10-tool conversation than on a 25-tool one; the shorter trajectory is genuinely harder. The first time I plotted this I assumed that I'd got the scoring wrong given the distribution, but after checking several times, it's the same result.
 
-The shape isn't gradient decay. Per-rep scores at the deep cells for Sonnet:
+Per-rep scores at the deep cells for Sonnet:
 
 | N   | Per-rep `instruction_decay` scores                                | abandon rate |
 | --- | ----------------------------------------------------------------- | ------------ |
@@ -140,7 +145,7 @@ The notation below: each character is one assistant turn. `1` means the rule was
 
 For the abandon-class reps, the reminder rescues exactly one assistant turn per delivery and accomplishes nothing in between. 
 
-For the alternation-class reps, the reminder accomplishes nothing at all - they comply on turns they'd have complied on anyway and skip turns they'd have skipped anyway. A fading agent would show graded compliance across distance-from-reminder. This is a step function. The result was clear: **Attention fade is the wrong story.**
+For the alternation-class reps, the reminder accomplishes nothing at all - they comply on turns they'd have complied on anyway and skip turns they'd have skipped anyway. A fading agent would show graded compliance across distance-from-reminder. **Attention fade is the wrong story.**
 
 The detail that pointed at the right one: both abandon-class reps showed `1.1.1.1.1.` alternating compliance for the *first 10 turns*, before any reminder fires. The agent had already chosen its strategy by then; the mid-trajectory reminder only briefly perturbed it before it went right back to its previous strategy.
 
@@ -161,7 +166,7 @@ In an effort to work around this "lock-in strategy", I decided to try putting th
 
 The mechanism: Sonnet picks a compliance strategy in the opening ~10 turns and locks in. Whatever the agent reads before producing its first text turn determines what gets locked. 
 
-The cold-start dip at N=10 and the drift at N=100+ aren't different failure modes - they're the same strategy-commitment dynamic intervened on at different points. 
+The N=10 dip and the long-N failures appear to be the same mechanism expressed at different depths: early strategy commitment.
 
 _(A separate earlier finding, with full evidence in [RESULTS.md](https://github.com/ruairidhwm/halftrace/blob/main/RESULTS.md), is that at N=10 you can also drive compliance to 1.00 with a different intervention: prepending two trivial off-topic user/assistant exchanges before the real task. That cure dies past the lock-in zone; the initial-message reminder works at any length we tested.)_
 
@@ -230,7 +235,7 @@ If the shape it returns matches what you'd have guessed, great. If it doesn't, y
 
 The simple counter rule was meant to be the warm-up. Something too trivial to score, before testing things that actually mattered. It ended up being the whole study, which was a fun surprise.
 
-One of the five most capable language models in the world will not, by default, hold "STATUS: 1, STATUS: 2, STATUS: 3" across a conversation it's otherwise perfectly competent in. The same model with one extra sentence in the initial user message holds the rule for 2010 consecutive turns without a single violation. The difference between "this model is broken on long-format work" and "this model is excellent on long-format work if you prompt it slightly differently" is a single user-side sentence.
+One of the five most capable language models in the world will not, by default, hold "STATUS: 1, STATUS: 2, STATUS: 3" across a conversation it's otherwise perfectly competent in. The same model with one extra sentence in the initial user message holds the rule for 2010 consecutive turns without a single violation. The entire difference ended up being one extra sentence in the opening prompt.
 
 I don't know what's special about Sonnet 4.6 here - why this model needs an opening-turn reinforcement that none of the other four do. I don't know if the same shape will appear in the next Anthropic release. I don't know why the cure works flawlessly on prefix rules and not at all on suffix rules. I'd like to know all three.
 

@@ -9,7 +9,7 @@ export default function Page() {
     <section>
       <h1 className="page-title text-2xl mb-6">{siteConfig.name}</h1>
       <p className="lede mb-4 max-w-prose">
-        {`I'm Ruairidh (/roo-ree/), a senior engineer who's spent the last few years building product at scale. I write about the things I'm actually working on: LLM evaluation, systems design, and whatever rabbit hole I've gone down that week. Code over commentary.`}
+        {`I'm Ruairidh (/roo-ree/), a senior engineer who's spent the last few years building product at scale. I write about (amongst other things): LLM evaluation, systems design, and whatever rabbit hole I've gone down that week. Code over commentary.`}
       </p>
       <div className="my-10">
         <h2

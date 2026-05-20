@@ -15,7 +15,11 @@ export function NewsletterSubscribe() {
   const tag = process.env.NEXT_PUBLIC_BUTTONDOWN_TAG?.trim();
 
   function handleSubmit() {
-    posthog.capture('newsletter_subscribed')
+    try {
+      posthog.capture('newsletter_subscribed')
+    } catch {
+      // never let analytics block the form submit
+    }
   }
 
   return (
@@ -60,6 +64,7 @@ export function NewsletterSubscribe() {
               placeholder="you@example.com…"
               className="min-h-11 min-w-0 flex-1 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-[var(--color-fg)] text-sm outline-none transition-[border-color,box-shadow] placeholder:text-[var(--color-muted)] focus-visible:border-[var(--color-accent)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent-soft)]"
             />
+            <input type="hidden" name="embed" value="1" />
             {tag ? <input type="hidden" name="tag" value={tag} /> : null}
             <button
               type="submit"
